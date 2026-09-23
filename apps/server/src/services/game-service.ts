@@ -26,6 +26,7 @@ import {
   getPlantPresentation,
   getStatus,
   getSuitability,
+  getWorstStatus,
   nextSeason,
   round,
   SPECIES_BY_ID,
@@ -1019,7 +1020,7 @@ export class GameService {
 
     const speciesAggregate = new Map<
       string,
-      { startPopulation: number; finalPopulation: number; startHealth: number; finalHealth: number; count: number; status: string }
+      { startPopulation: number; finalPopulation: number; startHealth: number; finalHealth: number; count: number; status: string | null }
     >();
     const distributionChanges: string[] = [];
 
@@ -1030,20 +1031,25 @@ export class GameService {
       if (!state) {
         continue;
       }
+      // 只汇总该物种在各区域的真实状态，最差状态必须来自真实区域，不得凭空注入“稳定”。
+      const regionStatus = final?.status ?? initial?.status;
+      if (!regionStatus) {
+        continue;
+      }
       const aggregate = speciesAggregate.get(state.speciesId) ?? {
         startPopulation: 0,
         finalPopulation: 0,
         startHealth: 0,
         finalHealth: 0,
         count: 0,
-        status: 'stable'
+        status: null
       };
       aggregate.startPopulation += initial?.population ?? 0;
       aggregate.finalPopulation += final?.population ?? 0;
       aggregate.startHealth += initial?.health ?? 0;
       aggregate.finalHealth += final?.health ?? 0;
       aggregate.count += 1;
-      aggregate.status = worstStatus(aggregate.status, final?.status ?? initial?.status ?? 'stable');
+      aggregate.status = getWorstStatus([aggregate.status, regionStatus]);
       speciesAggregate.set(state.speciesId, aggregate);
 
       if (initial && final && initial.status !== final.status) {
@@ -1055,20 +1061,26 @@ export class GameService {
 
     let totalStart = 0;
     let totalFinal = 0;
-    const speciesChanges = [...speciesAggregate.entries()].map(([speciesId, aggregate]) => {
-      totalStart += aggregate.startPopulation;
-      totalFinal += aggregate.finalPopulation;
-      return {
-        speciesId,
-        name: SPECIES_BY_ID.get(speciesId)?.name ?? speciesId,
-        populationChangePercent: percentChange(aggregate.startPopulation, aggregate.finalPopulation),
-        healthChange: round(
-          aggregate.finalHealth / Math.max(1, aggregate.count) - aggregate.startHealth / Math.max(1, aggregate.count),
-          1
-        ),
-        status: aggregate.status
-      };
-    });
+    // 过滤掉没有任何真实区域状态的汇总项，避免在报告中凭空生成状态。
+    const speciesChanges = [...speciesAggregate.entries()]
+      .filter(
+        (entry): entry is [string, { startPopulation: number; finalPopulation: number; startHealth: number; finalHealth: number; count: number; status: string }] =>
+          entry[1].status !== null
+      )
+      .map(([speciesId, aggregate]) => {
+        totalStart += aggregate.startPopulation;
+        totalFinal += aggregate.finalPopulation;
+        return {
+          speciesId,
+          name: SPECIES_BY_ID.get(speciesId)?.name ?? speciesId,
+          populationChangePercent: percentChange(aggregate.startPopulation, aggregate.finalPopulation),
+          healthChange: round(
+            aggregate.finalHealth / Math.max(1, aggregate.count) - aggregate.startHealth / Math.max(1, aggregate.count),
+            1
+          ),
+          status: aggregate.status
+        };
+      });
     speciesChanges.sort((left, right) => left.populationChangePercent - right.populationChangePercent);
 
     const incorrectSamples = Number(
@@ -1580,17 +1592,6 @@ function statusLabel(status: string): string {
     absent: '局部消失'
   };
   return labels[status] ?? status;
-}
-
-function worstStatus(left: string, right: string): string {
-  const severity: Record<string, number> = {
-    growing: 0,
-    stable: 1,
-    vulnerable: 2,
-    endangered: 3,
-    absent: 4
-  };
-  return (severity[right] ?? 1) > (severity[left] ?? 1) ? right : left;
 }
 
 export { CATALOG_VERSION };

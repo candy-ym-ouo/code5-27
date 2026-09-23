@@ -371,6 +371,37 @@ export function getStatus(population: number, carryingCapacity: number, health: 
   return 'stable';
 }
 
+export type SpeciesStatus = 'growing' | 'stable' | 'vulnerable' | 'endangered' | 'absent';
+
+const STATUS_SEVERITY: Record<SpeciesStatus, number> = {
+  growing: 0,
+  stable: 1,
+  vulnerable: 2,
+  endangered: 3,
+  absent: 4
+};
+
+/**
+ * 汇总一个物种在各区域的真实状态：返回其中最差的状态。
+ * 没有任何区域状态时返回 null，调用方不得凭空注入“稳定”。
+ */
+export function getWorstStatus(statuses: Array<string | null | undefined>): SpeciesStatus | null {
+  let worst: SpeciesStatus | null = null;
+  for (const status of statuses) {
+    if (!isSpeciesStatus(status)) {
+      continue;
+    }
+    if (worst === null || STATUS_SEVERITY[status] > STATUS_SEVERITY[worst]) {
+      worst = status;
+    }
+  }
+  return worst;
+}
+
+function isSpeciesStatus(status: string | null | undefined): status is SpeciesStatus {
+  return status !== null && status !== undefined && Object.prototype.hasOwnProperty.call(STATUS_SEVERITY, status);
+}
+
 export function evaluateSample(
   definition: SpeciesDefinition,
   state: SpeciesState,

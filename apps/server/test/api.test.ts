@@ -110,6 +110,30 @@ describe('closed-loop API', () => {
     expect(world.annualReview?.speciesChanges.every((item) => Number.isFinite(item.populationChangePercent))).toBe(true);
     expect(world.annualReview?.speciesChanges.every((item) => Number.isFinite(item.healthChange))).toBe(true);
 
+    // 回归：物种汇总状态必须等于各区域真实状态中的最差状态，且报告覆盖所有有状态的物种。
+    const regionStatusRows = store.db
+      .prepare('SELECT species_id, status FROM species_states WHERE save_id = ? AND year = 1')
+      .all(world.saveId) as unknown as Array<{ species_id: string; status: string }>;
+    const severity: Record<string, number> = {
+      growing: 0,
+      stable: 1,
+      vulnerable: 2,
+      endangered: 3,
+      absent: 4
+    };
+    const worstBySpecies = new Map<string, string>();
+    for (const row of regionStatusRows) {
+      const current = worstBySpecies.get(row.species_id);
+      if (!current || (severity[row.status] ?? 1) > (severity[current] ?? 1)) {
+        worstBySpecies.set(row.species_id, row.status);
+      }
+    }
+    const reportedStatus = new Map(world.annualReview!.speciesChanges.map((item) => [item.speciesId, item.status]));
+    expect(reportedStatus.size).toBe(worstBySpecies.size);
+    for (const [speciesId, worst] of worstBySpecies) {
+      expect(reportedStatus.get(speciesId)).toBe(worst);
+    }
+
     world = await command(agent, world, { type: 'BEGIN_NEXT_YEAR' });
     expect(world.year).toBe(2);
     expect(world.season).toBe('spring');

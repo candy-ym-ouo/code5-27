@@ -9,7 +9,8 @@ import {
   generateSiteState,
   getPhenologyWindow,
   getPlantPresentation,
-  getSuitability
+  getSuitability,
+  getWorstStatus
 } from './simulation.ts';
 
 describe('deterministic world simulation', () => {
@@ -130,5 +131,24 @@ describe('phenology shift', () => {
     expect(getPhenologyWindow(species, shifted, 'spring')).toEqual({ start: 1, peak: 4, end: 7 });
     expect(getPlantPresentation(species, shifted, 'spring', 4).stage).toBe('full_bloom');
     expect(applyOverwinter(state, { ...site, temperatureC: 12 }).phenology.shift).toBe(-1);
+  });
+});
+
+describe('cross-region status aggregation', () => {
+  it('reports growing when every region is genuinely growing', () => {
+    // 回归：年度汇总不得用预置的 stable 覆盖真实区域状态。
+    expect(getWorstStatus(['growing', 'growing', 'growing', 'growing'])).toBe('growing');
+  });
+
+  it('reflects the worst real status across all regions', () => {
+    expect(getWorstStatus(['growing', 'stable'])).toBe('stable');
+    expect(getWorstStatus(['stable', 'vulnerable', 'growing'])).toBe('vulnerable');
+    expect(getWorstStatus(['growing', 'endangered', 'stable'])).toBe('endangered');
+    expect(getWorstStatus(['vulnerable', 'absent'])).toBe('absent');
+  });
+
+  it('ignores unknown or missing statuses and returns null when no real status exists', () => {
+    expect(getWorstStatus([null, undefined, 'unknown'])).toBeNull();
+    expect(getWorstStatus([])).toBeNull();
   });
 });

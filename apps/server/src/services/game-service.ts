@@ -1019,7 +1019,7 @@ export class GameService {
 
     const speciesAggregate = new Map<
       string,
-      { startPopulation: number; finalPopulation: number; startHealth: number; finalHealth: number; count: number; status: string }
+      { startPopulation: number; finalPopulation: number; startHealth: number; finalHealth: number; count: number; status: string | null }
     >();
     const distributionChanges: string[] = [];
 
@@ -1030,20 +1030,28 @@ export class GameService {
       if (!state) {
         continue;
       }
-      const aggregate = speciesAggregate.get(state.speciesId) ?? {
+      // 汇总状态必须来自区域的真实状态，缺失（新扩散出现或局部消失）时回退到另一侧的真实状态，
+      // 绝不能凭空注入 stable，否则全区域增长会被压低误报为稳定。
+      const regionStatus = final?.status ?? initial?.status ?? null;
+      const existing = speciesAggregate.get(state.speciesId);
+      const aggregate = existing ?? {
         startPopulation: 0,
         finalPopulation: 0,
         startHealth: 0,
         finalHealth: 0,
         count: 0,
-        status: 'stable'
+        status: regionStatus
       };
       aggregate.startPopulation += initial?.population ?? 0;
       aggregate.finalPopulation += final?.population ?? 0;
       aggregate.startHealth += initial?.health ?? 0;
       aggregate.finalHealth += final?.health ?? 0;
       aggregate.count += 1;
-      aggregate.status = worstStatus(aggregate.status, final?.status ?? initial?.status ?? 'stable');
+      if (regionStatus) {
+        aggregate.status = aggregate.status
+          ? worstStatus(aggregate.status, regionStatus)
+          : regionStatus;
+      }
       speciesAggregate.set(state.speciesId, aggregate);
 
       if (initial && final && initial.status !== final.status) {
@@ -1058,6 +1066,9 @@ export class GameService {
     const speciesChanges = [...speciesAggregate.entries()].map(([speciesId, aggregate]) => {
       totalStart += aggregate.startPopulation;
       totalFinal += aggregate.finalPopulation;
+      if (!aggregate.status) {
+        throw new Error(`Missing real region status when aggregating species ${speciesId}`);
+      }
       return {
         speciesId,
         name: SPECIES_BY_ID.get(speciesId)?.name ?? speciesId,
